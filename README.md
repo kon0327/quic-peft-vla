@@ -1,9 +1,10 @@
 # quic-peft-vla
 
 Portable QuIC method for frozen dense PyTorch models, extracted from
-`quic-petf-mpv/quic_openvla/adapter.py`. The package name preserves the
-`petf` spelling. The Python API is
-`quic_petf_vla`. It depends only on PyTorch and safetensors; OpenVLA, OVLAB and
+`quic-petf-mpv/quic_openvla/adapter.py`. The GitHub project is named
+`quic-peft-vla`. Version 0.1.0 keeps its published distribution name
+`quic-petf-vla` and import namespace `quic_petf_vla` for compatibility with
+existing OpenVLA checkpoints and pinned installs. It depends only on PyTorch and safetensors; OpenVLA, OVLAB and
 benchmark dependencies belong to callers.
 
 ## Standalone installation
@@ -12,8 +13,8 @@ Python 3.10 or newer is required. Install the appropriate PyTorch build for your
 platform, then clone and install this package:
 
 ```bash
-git clone https://github.com/kon0327/quic-petf-vla.git
-cd quic-petf-vla
+git clone https://github.com/kon0327/quic-peft-vla.git
+cd quic-peft-vla
 python -m pip install .
 python examples/linear_adapter.py
 ```
@@ -28,12 +29,13 @@ location or on a surrounding project.
 To install the method and its OpenVLA integration from the OVLAB checkout root:
 
 ```bash
-python -m pip install ./external/quic-petf-vla ./external/openvla-quic
+python -m pip install ./external/quic-peft-vla ./external/openvla-quic
 ```
 
-The OpenVLA fork declares `quic-petf-vla==0.1.0`; installing both local projects
-supplies that dependency without requiring a published package index entry.
-OVLAB pins this repository as its `external/quic-petf-vla` submodule. OpenVLA
+The OpenVLA fork declares the compatible `quic-petf-vla==0.1.0` distribution;
+installing both local projects supplies that dependency without requiring a
+published package index entry.
+OVLAB pins this repository as its `external/quic-peft-vla` submodule. OpenVLA
 loading, action normalization, dataset handling, experiment configuration,
 training orchestration, and benchmark rollouts belong to the host integration.
 They are not required by this method package.

@@ -22,9 +22,9 @@ classifiers = [
 dependencies = ["torch>=2.2", "safetensors>=0.4.2"]
 
 [project.urls]
-Repository = "https://github.com/kon0327/quic-petf-vla"
-Issues = "https://github.com/kon0327/quic-petf-vla/issues"
-Changelog = "https://github.com/kon0327/quic-petf-vla/blob/main/CHANGELOG.md"
+Repository = "https://github.com/kon0327/quic-peft-vla"
+Issues = "https://github.com/kon0327/quic-peft-vla/issues"
+Changelog = "https://github.com/kon0327/quic-peft-vla/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "build>=1", "twine>=5"]
