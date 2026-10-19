@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            torch: "torch==2.2.0"
+          - python: "3.12"
+            torch: "torch>=2.2"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install CPU runtime and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'numpy<2'
+          python -m pip install '${{ matrix.torch }}' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install '.[dev]'
+          python -m pip check
+      - name: Test installed package
+        run: python -m pytest
+      - name: Run standalone example
+        run: python examples/linear_adapter.py
+      - name: Build and check distributions
+        run: |
+          python -m build
+          python -m twine check dist/*

@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this software, cite this implementation and the QuIC research on which your experiment is based."
+type: software
+title: quic-petf-vla
+version: 0.1.0
+repository-code: "https://github.com/kon0327/quic-petf-vla"
+license: MIT
+authors:
+  - family-names: "Konečný"
+    given-names: "Jiří"
+abstract: "Portable determinant compound adapters for frozen dense PyTorch models."
+keywords:
+  - QuIC
+  - parameter-efficient fine-tuning
+  - PyTorch

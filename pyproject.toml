@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quic-petf-vla"
+version = "0.1.0"
+description = "Portable determinant compound adapters for dense PyTorch models"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jiří Konečný" }]
+requires-python = ">=3.10"
+keywords = ["quic", "parameter-efficient-fine-tuning", "pytorch", "adapters"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["torch>=2.2", "safetensors>=0.4.2"]
+
+[project.urls]
+Repository = "https://github.com/kon0327/quic-petf-vla"
+Issues = "https://github.com/kon0327/quic-petf-vla/issues"
+Changelog = "https://github.com/kon0327/quic-petf-vla/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "build>=1", "twine>=5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["quic_petf_vla*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

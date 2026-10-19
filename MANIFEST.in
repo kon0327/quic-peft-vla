@@ -1,0 +1,3 @@
+include README.md CHANGELOG.md CONTRIBUTING.md CITATION.cff PROVENANCE.json
+recursive-include examples *.py
+recursive-include tests *.py
