@@ -1,12 +1,5 @@
 {
   "schema_version": 1,
-  "source_project": "quic-petf-mpv",
-  "source_revision": "f1e71f686d2f4da94d11a67fd4bafbe516d007d1",
-  "source_author": "Jiří Konečný",
-  "source_file": "quic_openvla/adapter.py",
-  "source_file_sha256": "a0dcaa1e7ec45753397f4b7dfca95f24091020aa9a8fa2494a15769bf3c4d33c",
-  "extracted_file": "src/quic_petf_vla/adapter.py",
-  "extraction": "byte-identical source; package boundary and public exports supplied separately",
   "research_method": {
     "title": "QuIC: Quantum-Inspired Compound Adapters for Parameter Efficient Fine-Tuning",
     "authors": ["Snehal Raj", "Brian Coyle"],
