@@ -1,4 +1,4 @@
-# quic-petf-vla
+# quic-peft-vla
 
 Portable QuIC method for frozen dense PyTorch models, extracted from
 `quic-petf-mpv/quic_openvla/adapter.py`. The package name preserves the
@@ -67,10 +67,6 @@ Compound Adapters for Parameter Efficient Fine-Tuning* (2025)](https://arxiv.org
 The compound-PEFT snapshot's [README citation](https://github.com/kon0327/OpenVLABenchmark/blob/main/external/compound-peft/README.md)
 lists a different title and author list for this same arXiv ID. This project
 uses the title and authors in the [canonical arXiv record](https://arxiv.org/abs/2502.06916).
-
-The `adapter.py` implementation in this package was extracted by Jiří Konečný
-from [`quic-petf-mpv/quic_openvla/adapter.py`](https://github.com/kon0327/quic-petf-mpv/blob/f1e71f686d2f4da94d11a67fd4bafbe516d007d1/quic_openvla/adapter.py).
-It is byte-identical to that source at commit
 `f1e71f686d2f4da94d11a67fd4bafbe516d007d1`; its SHA256 and extraction history
 are recorded in [PROVENANCE.json](PROVENANCE.json).
 
