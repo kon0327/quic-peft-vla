@@ -2,10 +2,22 @@
   "schema_version": 1,
   "source_project": "quic-petf-mpv",
   "source_revision": "f1e71f686d2f4da94d11a67fd4bafbe516d007d1",
+  "source_author": "Jiří Konečný",
   "source_file": "quic_openvla/adapter.py",
   "source_file_sha256": "a0dcaa1e7ec45753397f4b7dfca95f24091020aa9a8fa2494a15769bf3c4d33c",
   "extracted_file": "src/quic_petf_vla/adapter.py",
   "extraction": "byte-identical source; package boundary and public exports supplied separately",
+  "research_method": {
+    "title": "QuIC: Quantum-Inspired Compound Adapters for Parameter Efficient Fine-Tuning",
+    "authors": ["Snehal Raj", "Brian Coyle"],
+    "arxiv": "2502.06916",
+    "url": "https://arxiv.org/abs/2502.06916"
+  },
+  "compound_peft_readme_citation": {
+    "title": "QuIC: Quantum-Inspired Compound Adapters with Dynamical Lie Algebra",
+    "authors": ["Snehal Raj", "Luka Music", "Elham Kashefi"],
+    "matches_canonical_arxiv_record": false
+  },
   "source_license": "No license for this source file was declared in the supplied source project.",
   "package_license": "MIT",
   "license_authorization": "MIT selected by the copyright holder on 2026-10-19."

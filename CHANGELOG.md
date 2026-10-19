@@ -4,6 +4,8 @@
 
 - Standalone repository, CPU example, numerical and artifact tests, package
   build checks, and GitHub Actions CI.
+- Add the canonical QuIC paper citation and identify the extracted
+  `quic-petf-mpv` adapter source.
 
 ## 0.1.0
 

@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use this software, cite this implementation and the QuIC research on which your experiment is based."
+message: "If you use this software, cite this implementation and the original QuIC paper in references."
 type: software
 title: quic-petf-vla
 version: 0.1.0
@@ -13,3 +13,17 @@ keywords:
   - QuIC
   - parameter-efficient fine-tuning
   - PyTorch
+references:
+  - type: article
+    authors:
+      - family-names: "Raj"
+        given-names: "Snehal"
+      - family-names: "Coyle"
+        given-names: "Brian"
+    title: "QuIC: Quantum-Inspired Compound Adapters for Parameter Efficient Fine-Tuning"
+    year: 2025
+    url: "https://arxiv.org/abs/2502.06916"
+    identifiers:
+      - type: other
+        value: "arXiv:2502.06916"
+        description: "Preprint identifier"
