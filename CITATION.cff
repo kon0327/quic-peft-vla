@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use this software, cite this implementation and the original QuIC paper in references."
 type: software
-title: quic-petf-vla
+title: quic-peft-vla
 version: 0.1.0
-repository-code: "https://github.com/kon0327/quic-petf-vla"
+repository-code: "https://github.com/kon0327/quic-peft-vla"
 license: MIT
 authors:
   - family-names: "Konečný"
