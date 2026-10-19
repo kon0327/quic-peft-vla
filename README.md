@@ -24,22 +24,6 @@ adapter, and checks identical predictions after reloading. No dataset or model
 download is needed. The package has no runtime dependence on its checkout
 location or on a surrounding project.
 
-## OpenVLA integration
-
-To install the method and its OpenVLA integration from the OVLAB checkout root:
-
-```bash
-python -m pip install ./external/quic-peft-vla ./external/openvla-quic
-```
-
-The OpenVLA fork declares the compatible `quic-petf-vla==0.1.0` distribution;
-installing both local projects supplies that dependency without requiring a
-published package index entry.
-OVLAB pins this repository as its `external/quic-peft-vla` submodule. OpenVLA
-loading, action normalization, dataset handling, experiment configuration,
-training orchestration, and benchmark rollouts belong to the host integration.
-They are not required by this method package.
-
 ## Method API
 
 `inject(model, {"exact.module.name": AdapterConfig(...)})` freezes the host and
