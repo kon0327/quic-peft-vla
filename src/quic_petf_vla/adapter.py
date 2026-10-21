@@ -1,4 +1,4 @@
-"""Differentiable, output-side QuIC adapters over frozen dense linear layers.
+"""Differentiable, output-side QuIC adapters over frozen Linear/Conv2d layers.
 
 The compound coordinates use ascending, lexicographic combinations. Each block
 contains the requested compound orders followed by unchanged coordinates. Bias
@@ -23,7 +23,8 @@ from torch.nn import functional as F
 
 
 _CONSTRUCTION_DTYPES = {"float32": torch.float32, "float64": torch.float64}
-_FORMAT_VERSION = 1
+_FORMAT_VERSION = 2
+_LINEAR_FORMAT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -189,18 +190,55 @@ class CompoundOperator(nn.Module):
             base = self.base(_CONSTRUCTION_DTYPES[self.config.construction_dtype])
             return tuple(compound_matrix(base, order, getattr(self, f"indices_{order}", None)) for order in self.config.orders)
 
+    def _second_compound(self, part: Tensor, base: Tensor) -> Tensor:
+        """Apply C2(base) through its antisymmetric tensor representation.
+
+        If A[j,k] = v[j,k] and A[k,j] = -v[j,k], the upper triangle of
+        base @ A @ base.T equals C2(base) @ v. This avoids the quadratic
+        compound matrix and its heavily repeated-index backward scatter.
+        """
+        count, n = self.config.block_count, self.config.base_size
+        with torch.autocast(device_type=part.device.type, enabled=False):
+            dtype = torch.promote_types(part.dtype, base.dtype)
+            base = base.to(dtype=dtype).expand(count, -1, -1)
+            rows = part.reshape(-1, count, part.shape[-1]).transpose(0, 1).to(dtype=dtype)
+            positions = rows.shape[1]
+            first, second = self.indices_2.unbind(-1)
+            skew = rows.new_zeros(count, positions, n, n)
+            skew[..., first, second] = rows
+            skew[..., second, first] = -rows
+            right = torch.bmm(skew.reshape(count, positions * n, n), base.transpose(-1, -2))
+            right = right.reshape(count, positions, n, n)
+            rotated = torch.bmm(base, right.permute(0, 2, 1, 3).reshape(count, n, positions * n))
+            rotated = rotated.reshape(count, n, positions, n).permute(0, 2, 1, 3)
+            result = rotated[..., first, second].transpose(0, 1).reshape_as(part)
+            return result.to(dtype=part.dtype)
+
     def forward(self, values: Tensor) -> Tensor:
         if values.shape[-1] != self.out_features:
             raise ValueError(f"expected {self.out_features} output coordinates")
         blocks = values.reshape(*values.shape[:-1], self.config.block_count, self.block_size)
         pieces = []
         start = 0
-        for size, matrix in zip(self.compound_sizes, self.matrices()):
+        with torch.autocast(device_type=values.device.type, enabled=False):
+            base = self.base(_CONSTRUCTION_DTYPES[self.config.construction_dtype])
+        for order, size in zip(self.config.orders, self.compound_sizes):
+            part = blocks[..., start:start + size]
+            if order == 2:
+                pieces.append(self._second_compound(part, base))
+                start += size
+                continue
+            with torch.autocast(device_type=values.device.type, enabled=False):
+                matrix = compound_matrix(base, order, getattr(self, f"indices_{order}", None))
             matrix = matrix.to(dtype=values.dtype)
             if self.config.share_across_blocks:
                 matrix = matrix.expand(self.config.block_count, -1, -1)
-            part = blocks[..., start:start + size]
-            pieces.append(torch.matmul(part.unsqueeze(-2), matrix.transpose(-1, -2)).squeeze(-2))
+            # Tokens/spatial positions are matrix rows, not broadcast batch
+            # axes. matmul(..., 1, size) otherwise materializes one size^2
+            # matrix per position (269 GiB for the OpenVLA vocabulary head).
+            rows = part.reshape(-1, self.config.block_count, size).transpose(0, 1)
+            rotated = torch.bmm(rows, matrix.transpose(-1, -2))
+            pieces.append(rotated.transpose(0, 1).reshape_as(part))
             start += size
         if self.padding_per_block:
             pieces.append(blocks[..., start:])
@@ -256,6 +294,72 @@ class QuICLinear(nn.Module):
         return merged
 
 
+class QuICConv2d(nn.Module):
+    """Rotate convolution output channels at each spatial position.
+
+    The kernel projection is rotated before adding the unchanged host bias.
+    As with QuICLinear, the host-plus-delta form retains exact host rounding at
+    identity. For grouped convolutions, block boundaries must align with group
+    boundaries, so every rotation and its merged kernel preserve connectivity.
+    """
+
+    def __init__(self, base_layer: nn.Conv2d, config: AdapterConfig) -> None:
+        super().__init__()
+        _validate_conv2d(base_layer)
+        resolved = config.resolve(base_layer.out_channels)
+        _validate_conv_groups(base_layer, resolved)
+        self.base_layer = base_layer
+        self.base_layer.requires_grad_(False)
+        self.in_channels, self.out_channels = base_layer.in_channels, base_layer.out_channels
+        # Common dimensions used by target inventory and adapter tooling.
+        self.in_features, self.out_features = self.in_channels, self.out_channels
+        self.kernel_size = base_layer.kernel_size
+        self.stride, self.padding = base_layer.stride, base_layer.padding
+        self.dilation, self.groups = base_layer.dilation, base_layer.groups
+        self.padding_mode = base_layer.padding_mode
+        self.adapter = CompoundOperator(self.out_channels, resolved, device=base_layer.weight.device)
+        self.config = self.adapter.config
+        self.adapter_enabled = True
+
+    @property
+    def weight(self) -> nn.Parameter:
+        return self.base_layer.weight
+
+    @property
+    def bias(self) -> nn.Parameter | None:
+        return self.base_layer.bias
+
+    def forward(self, values: Tensor) -> Tensor:
+        if not self.adapter_enabled:
+            return self.base_layer(values)
+        projected = self.base_layer._conv_forward(values, self.weight, None)
+        # -3 is the channel axis for both NCHW and unbatched CHW inputs.
+        rotated = self.adapter(projected.movedim(-3, -1)).movedim(-1, -3)
+        if self.bias is not None:
+            rotated = self.base_layer(values) + (rotated - projected)
+        return rotated
+
+    @torch.no_grad()
+    def merged_conv2d(self) -> nn.Conv2d:
+        flattened = self.weight.flatten(1)
+        weight = self.adapter(flattened.transpose(0, 1)).transpose(0, 1).reshape_as(self.weight)
+        merged = nn.Conv2d(
+            self.in_channels, self.out_channels, self.kernel_size, stride=self.stride,
+            padding=self.padding, dilation=self.dilation, groups=self.groups,
+            bias=self.bias is not None, padding_mode=self.padding_mode,
+            device=self.weight.device, dtype=self.weight.dtype,
+        )
+        merged.weight.copy_(weight)
+        if self.bias is not None:
+            merged.bias.copy_(self.bias)
+        merged.requires_grad_(False)
+        merged.train(self.training)
+        return merged
+
+
+_ADAPTER_TYPES = (QuICLinear, QuICConv2d)
+
+
 def _validate_linear(layer: nn.Module) -> None:
     if type(layer) is not nn.Linear:
         raise TypeError("QuIC supports plain torch.nn.Linear only; quantized or specialized subclasses are unsupported")
@@ -263,14 +367,42 @@ def _validate_linear(layer: nn.Module) -> None:
         raise ValueError("host weights must be materialized floating-point tensors")
 
 
-def _describe(name: str, layer: nn.Linear | QuICLinear, config: AdapterConfig) -> dict[str, Any]:
-    resolved = config.resolve(layer.out_features)
+def _validate_conv2d(layer: nn.Module) -> None:
+    if type(layer) is not nn.Conv2d:
+        raise TypeError("QuIC supports plain torch.nn.Conv2d only; quantized or specialized subclasses are unsupported")
+    if not layer.weight.is_floating_point() or layer.weight.device.type == "meta":
+        raise ValueError("host weights must be materialized floating-point tensors")
+
+
+def _validate_conv_groups(layer: nn.Conv2d, config: AdapterConfig) -> None:
+    if config.block_count % layer.groups:
+        raise ValueError(
+            f"Conv2d block_count={config.block_count} must be divisible by groups={layer.groups} "
+            "so output rotations preserve convolution groups"
+        )
+
+
+def _validate_target(layer: nn.Module, config: AdapterConfig) -> AdapterConfig:
+    if type(layer) is nn.Conv2d:
+        _validate_conv2d(layer)
+        resolved = config.resolve(layer.out_channels)
+        _validate_conv_groups(layer, resolved)
+        return resolved
+    _validate_linear(layer)
+    return config.resolve(layer.out_features)
+
+
+def _describe(name: str, layer: nn.Module, config: AdapterConfig) -> dict[str, Any]:
+    is_conv = isinstance(layer, (nn.Conv2d, QuICConv2d))
+    in_features = layer.in_channels if is_conv else layer.in_features
+    out_features = layer.out_channels if is_conv else layer.out_features
+    resolved = config.resolve(out_features)
     dimension = sum(math.comb(resolved.base_size, k) for k in resolved.orders)
-    block_size = layer.out_features // resolved.block_count
+    block_size = out_features // resolved.block_count
     count = 1 if resolved.share_across_blocks else resolved.block_count
     parameters = count * (resolved.base_size * (resolved.base_size - 1) // 2 if resolved.orthogonal else resolved.base_size ** 2)
-    return {
-        "name": name, "in_features": layer.in_features, "out_features": layer.out_features,
+    description = {
+        "name": name, "in_features": in_features, "out_features": out_features,
         "bias": layer.bias is not None, "config": resolved.to_dict(),
         "block_size": block_size, "compound_dimension_per_block": dimension,
         "identity_padding_per_block": block_size - dimension,
@@ -279,6 +411,16 @@ def _describe(name: str, layer: nn.Linear | QuICLinear, config: AdapterConfig) -
         "parameterization": "minimal_skew_cayley" if resolved.orthogonal else "identity_plus_full_delta",
         "index_order": "ascending_lexicographic", "bias_policy": "unchanged",
     }
+    if is_conv:
+        description.update({
+            "module_type": "Conv2d", "in_channels": layer.in_channels,
+            "out_channels": layer.out_channels, "kernel_size": list(layer.kernel_size),
+            "stride": list(layer.stride),
+            "padding": layer.padding if isinstance(layer.padding, str) else list(layer.padding),
+            "dilation": list(layer.dilation), "groups": layer.groups,
+            "padding_mode": layer.padding_mode,
+        })
+    return description
 
 
 def _replace_module(model: nn.Module, name: str, replacement: nn.Module) -> None:
@@ -301,32 +443,32 @@ def inject(model: nn.Module, targets: Mapping[str, AdapterConfig]) -> list[dict[
             layer = model.get_submodule(name)
         except AttributeError as error:
             raise ValueError(f"target module {name!r} does not exist") from error
-        _validate_linear(layer)
-        prepared.append((name, layer, config.resolve(layer.out_features), _describe(name, layer, config)))
+        resolved = _validate_target(layer, config)
+        prepared.append((name, layer, resolved, _describe(name, layer, resolved)))
     if len({id(layer) for _, layer, _, _ in prepared}) != len(prepared):
-        raise ValueError("targets alias the same Linear; weight-sharing requires an explicit strategy")
-    if any(isinstance(module, QuICLinear) for module in model.modules()):
+        raise ValueError("targets alias the same layer; weight-sharing requires an explicit strategy")
+    if any(isinstance(module, _ADAPTER_TYPES) for module in model.modules()):
         raise ValueError("host already contains QuIC adapters")
     model.requires_grad_(False)
     for name, layer, config, _ in prepared:
-        wrapper = QuICLinear(layer, config)
+        wrapper = QuICConv2d(layer, config) if type(layer) is nn.Conv2d else QuICLinear(layer, config)
         wrapper.train(layer.training)
         _replace_module(model, name, wrapper)
     return [description for _, _, _, description in prepared]
 
 
 def adapter_manifest(model: nn.Module) -> list[dict[str, Any]]:
-    return [_describe(name, module, module.config) for name, module in model.named_modules() if isinstance(module, QuICLinear)]
+    return [_describe(name, module, module.config) for name, module in model.named_modules() if isinstance(module, _ADAPTER_TYPES)]
 
 
 def adapter_parameters(model: nn.Module) -> list[nn.Parameter]:
-    return [module.adapter.parameter for module in model.modules() if isinstance(module, QuICLinear)]
+    return [module.adapter.parameter for module in model.modules() if isinstance(module, _ADAPTER_TYPES)]
 
 
 @contextmanager
 def disabled_adapters(model: nn.Module):
     """Temporarily evaluate the frozen original host, including nested contexts."""
-    previous = [(module, module.adapter_enabled) for module in model.modules() if isinstance(module, QuICLinear)]
+    previous = [(module, module.adapter_enabled) for module in model.modules() if isinstance(module, _ADAPTER_TYPES)]
     try:
         for module, _ in previous:
             module.adapter_enabled = False
@@ -338,13 +480,15 @@ def disabled_adapters(model: nn.Module):
 
 def merge_adapters(model: nn.Module, names: Iterable[str] | None = None) -> list[dict[str, Any]]:
     """Replace selected adapters with dense RW host weights, keeping bias fixed."""
-    wrappers = {name: module for name, module in model.named_modules() if isinstance(module, QuICLinear)}
+    wrappers = {name: module for name, module in model.named_modules() if isinstance(module, _ADAPTER_TYPES)}
     selected = list(wrappers) if names is None else list(names)
     if len(set(selected)) != len(selected) or any(name not in wrappers for name in selected):
         raise ValueError("merge names must be distinct existing QuIC layers")
     manifest = [_describe(name, wrappers[name], wrappers[name].config) for name in selected]
     for name in selected:
-        _replace_module(model, name, wrappers[name].merged_linear())
+        wrapper = wrappers[name]
+        merged = wrapper.merged_conv2d() if isinstance(wrapper, QuICConv2d) else wrapper.merged_linear()
+        _replace_module(model, name, merged)
     return manifest
 
 
@@ -382,10 +526,12 @@ def save_adapter(model: nn.Module, directory: str | Path, host_identity: Mapping
     if any(not torch.isfinite(p).all() for p in params):
         raise ValueError("adapter parameters contain nonfinite values")
     _canonical(dict(metadata or {}))
-    binding = {"format_version": _FORMAT_VERSION, "host_identity": identity, "manifest": manifest}
+    # Preserve byte-for-byte v1 Linear manifests and artifact compatibility.
+    version = _FORMAT_VERSION if any(entry.get("module_type") == "Conv2d" for entry in manifest) else _LINEAR_FORMAT_VERSION
+    binding = {"format_version": version, "host_identity": identity, "manifest": manifest}
     binding_sha = hashlib.sha256(_canonical(binding)).hexdigest()
     tensors = {_tensor_key(name): module.adapter.parameter.detach().cpu().contiguous()
-               for name, module in model.named_modules() if isinstance(module, QuICLinear)}
+               for name, module in model.named_modules() if isinstance(module, _ADAPTER_TYPES)}
     target = Path(directory)
     target.mkdir(parents=True, exist_ok=True)
     if (target / "adapter.json").exists() or (target / "adapter.safetensors").exists():
@@ -406,7 +552,7 @@ def load_adapter(model: nn.Module, directory: str | Path, host_identity: Mapping
     identity = _validate_host_identity(host_identity)
     directory = Path(directory)
     payload = json.loads((directory / "adapter.json").read_text(encoding="utf-8"))
-    if payload.get("format_version") != _FORMAT_VERSION:
+    if payload.get("format_version") not in (_LINEAR_FORMAT_VERSION, _FORMAT_VERSION):
         raise ValueError("unsupported QuIC artifact version")
     if payload.get("host_identity") != identity:
         raise ValueError("adapter host identity does not match the requested host")
@@ -428,7 +574,9 @@ def load_adapter(model: nn.Module, directory: str | Path, host_identity: Mapping
             layer = model.get_submodule(name)
         except AttributeError as error:
             raise ValueError(f"saved target {name!r} is missing from host") from error
-        _validate_linear(layer)
+        _validate_target(layer, config)
+        if payload["format_version"] == _LINEAR_FORMAT_VERSION and type(layer) is nn.Conv2d:
+            raise ValueError("Conv2d targets require QuIC artifact version 2")
         if _describe(name, layer, config) != entry:
             raise ValueError(f"saved target manifest does not match host layer {name!r}")
         key = _tensor_key(name)
